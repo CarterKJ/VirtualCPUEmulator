@@ -1,0 +1,16 @@
+INPUT n,Enter number [>];
+
+MOVE I1,1;
+MOVE I2,n;
+MOVE I3,1;
+
+factorial_loop:
+    JZ I2,factorial_end;
+    MUL I1,I3;
+    ADD I3,1;
+    SUB I2,1;
+    JNZ I2,factorial_loop;
+
+factorial_end:
+    PRINT I1;
+    HALT 0;
