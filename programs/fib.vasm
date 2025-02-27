@@ -1,0 +1,20 @@
+start:
+    INPUT n,Enter number of iterations [>];
+    MOVE I1,0;
+    MOVE I2,1;
+    MOVE I3,I2;
+    MOVE I4,n;
+
+loop_start:
+    JZ I4,end;   // jump to end of I4 is 0
+    PRINT I3;
+    MOVE I1,I2;
+    MOVE I2,I3;
+    MOVE I3,0;
+    ADD I3,I1;
+    ADD I3,I2;
+    SUB I4,1;
+    JMP loop_start;
+
+end:
+    HALT 0;
