@@ -736,6 +736,7 @@ class Compiler:
             for i, value in enumerate(values):
                 self.CPU.update_memory(memory_head + i, value)
             self.variables[name] = [memory_head, len(values), var_type]
+            self.memory_index += len(values)
         except Exception as e:
             self.report_error(str(e))
 

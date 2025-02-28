@@ -66,11 +66,15 @@ class VirtualCPU:
         packed = struct.pack('!f', f)
         binary = ''.join(f'{b:08b}' for b in packed)
         sign_bit = int(binary[0], 2)
-        exponent = int(binary[1:9], 2) - 127
+        raw_exponent = int(binary[1:9], 2)
         mantissa = int(binary[9:], 2)
-        return sign_bit, exponent, mantissa
+        return sign_bit, raw_exponent, mantissa
 
-    def ieee754_to_float(self, sign_bit, exponent, mantissa):
-        exponent_val = (1 - 127) if exponent == 0 else exponent
-        mantissa_value = 1 + mantissa / (2 ** 23)
-        return ((-1) ** sign_bit) * (2 ** exponent_val) * mantissa_value
+    def ieee754_to_float(self, sign_bit, raw_exponent, mantissa):
+        if raw_exponent == 0:
+            exponent = -126
+            mantissa_value = mantissa / (2 ** 23)
+        else:
+            exponent = raw_exponent - 127
+            mantissa_value = 1 + mantissa / (2 ** 23)
+        return ((-1) ** sign_bit) * (2 ** exponent) * mantissa_value
