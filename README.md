@@ -72,7 +72,7 @@ A Virtual CPU Emulator that executes assembly-like instructions, supports vector
 
 ### General Syntax:
 - All lines must end with **;**.
-- Declare vectors as [ n n1 n2 ..], you can use variables and registers as values so a vector like [ 3.3 4 FF3 variable 4.2] is valid.
+- Declare vectors as [ n n1 n2 ..] using a space to sperate values, you can use variables and registers as values so a vector like [ 3.3 4 FF3 variable 4.2] is valid.
 - To add a comment use //
 - You can not add floats to integer registers.
 -   The value you want to modify always the first argument, ie **MOVE I1,3** and **ADD I1,I3** I1 is the register being modified for both.
