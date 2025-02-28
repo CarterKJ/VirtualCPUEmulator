@@ -222,15 +222,6 @@ class InstructionRegistrar:
         else:
             self.compiler.report_error(f"Invalid key for MOVE operation: {reg}")
 
-    def load_mem(self, reg, address):
-        value = self.CPU.return_memory(address)
-        if reg in self.CPU.int_registers:
-            self.CPU.update_register(reg, int(value))
-        elif reg in self.CPU.ff_registers:
-            self.CPU.update_register(reg, float(value))
-        elif reg in self.CPU.vector_registers:
-            self.CPU.update_register(reg, value)
-
     def print(self, reg):
         if reg in self.CPU.int_registers or reg in self.CPU.ff_registers or reg in self.CPU.vector_registers:
             print(self.CPU.return_register(reg))

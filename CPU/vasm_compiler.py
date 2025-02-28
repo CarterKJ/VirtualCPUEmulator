@@ -271,23 +271,38 @@ class Compiler:
                 else:
                     self.report_error(f"Cannot add a {var_type} variable to register {reg1}")
             else:
-                try:
-                    operand = float(key)
-                except:
-                    self.report_error(f"Invalid type for ADD operation. Got: {key}")
-                if reg1.startswith("I"):
-                    value = self.CPU.return_register(reg1)
-                    if operand.is_integer():
-                        self.CPU.update_register(reg1, value + int(operand))
-                    else:
-                        self.report_error(f"Cannot add a float literal to an integer register {reg1}")
-                elif reg1.startswith("FF"):
-                    value = self.CPU.return_register(reg1)
-                    self.CPU.update_register(reg1, value + operand)
-                elif reg1.startswith("V"):
-                    vector = self.CPU.return_register(reg1)
-                    result = [x + operand for x in vector]
-                    self.CPU.update_register(reg1, result)
+                if key.startswith("[") and key.endswith("]"):
+                    try:
+                        vector_literal = [float(x) for x in key[1:-1].split()]
+                        if reg1.startswith("V"):
+                            vector = self.CPU.return_register(reg1)
+                            if len(vector) == len(vector_literal):
+                                result = [x + y for x, y in zip(vector, vector_literal)]
+                                self.CPU.update_register(reg1, result)
+                            else:
+                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
+                        else:
+                            self.report_error(f"Cannot add a vector literal to a non-vector register {reg1}")
+                    except ValueError:
+                        self.report_error(f"Invalid vector literal: {key}")
+                else:
+                    try:
+                        operand = float(key)
+                    except:
+                        self.report_error(f"Invalid type for ADD operation. Got: {key}")
+                    if reg1.startswith("I"):
+                        value = self.CPU.return_register(reg1)
+                        if operand.is_integer():
+                            self.CPU.update_register(reg1, value + int(operand))
+                        else:
+                            self.report_error(f"Cannot add a float literal to an integer register {reg1}")
+                    elif reg1.startswith("FF"):
+                        value = self.CPU.return_register(reg1)
+                        self.CPU.update_register(reg1, value + operand)
+                    elif reg1.startswith("V"):
+                        vector = self.CPU.return_register(reg1)
+                        result = [x + operand for x in vector]
+                        self.CPU.update_register(reg1, result)
         else:
             self.report_error(f"Invalid register for ADD operation: {reg1}")
 
@@ -311,7 +326,6 @@ class Compiler:
                         result = [x - float(value) for x in vector]
                         self.CPU.update_register(reg1, result)
                 elif var_type == "vector":
-
                     if reg1.startswith("V"):
                         vector1 = self.CPU.return_register(reg1)
                         vector2 = [self.CPU.return_memory(head + i) for i in range(buffer)]
@@ -325,23 +339,38 @@ class Compiler:
                 else:
                     self.report_error(f"Cannot subtract a {var_type} variable from register {reg1}")
             else:
-                try:
-                    operand = float(key)
-                except:
-                    self.report_error(f"Invalid type for SUB operation. Got: {key}")
-                if reg1.startswith("I"):
-                    value = self.CPU.return_register(reg1)
-                    if operand.is_integer():
-                        self.CPU.update_register(reg1, value - int(operand))
-                    else:
-                        self.report_error(f"Cannot subtract a float literal from an integer register {reg1}")
-                elif reg1.startswith("FF"):
-                    value = self.CPU.return_register(reg1)
-                    self.CPU.update_register(reg1, value - operand)
-                elif reg1.startswith("V"):
-                    vector = self.CPU.return_register(reg1)
-                    result = [x - operand for x in vector]
-                    self.CPU.update_register(reg1, result)
+                if key.startswith("[") and key.endswith("]"):
+                    try:
+                        vector_literal = [float(x) for x in key[1:-1].split()]
+                        if reg1.startswith("V"):
+                            vector = self.CPU.return_register(reg1)
+                            if len(vector) == len(vector_literal):
+                                result = [x - y for x, y in zip(vector, vector_literal)]
+                                self.CPU.update_register(reg1, result)
+                            else:
+                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
+                        else:
+                            self.report_error(f"Cannot subtract a vector literal from a non-vector register {reg1}")
+                    except ValueError:
+                        self.report_error(f"Invalid vector literal: {key}")
+                else:
+                    try:
+                        operand = float(key)
+                    except:
+                        self.report_error(f"Invalid type for SUB operation. Got: {key}")
+                    if reg1.startswith("I"):
+                        value = self.CPU.return_register(reg1)
+                        if operand.is_integer():
+                            self.CPU.update_register(reg1, value - int(operand))
+                        else:
+                            self.report_error(f"Cannot subtract a float literal from an integer register {reg1}")
+                    elif reg1.startswith("FF"):
+                        value = self.CPU.return_register(reg1)
+                        self.CPU.update_register(reg1, value - operand)
+                    elif reg1.startswith("V"):
+                        vector = self.CPU.return_register(reg1)
+                        result = [x - operand for x in vector]
+                        self.CPU.update_register(reg1, result)
         else:
             self.report_error(f"Invalid register for SUB operation: {reg1}")
 
@@ -378,23 +407,38 @@ class Compiler:
                 else:
                     self.report_error(f"Cannot multiply a {var_type} variable with register {reg1}")
             else:
-                try:
-                    operand = float(key)
-                except:
-                    self.report_error(f"Invalid type for MUL operation. Got: {key}")
-                if reg1.startswith("I"):
-                    value = self.CPU.return_register(reg1)
-                    if operand.is_integer():
-                        self.CPU.update_register(reg1, value * int(operand))
-                    else:
-                        self.report_error(f"Cannot multiply an integer register {reg1} with a float literal")
-                elif reg1.startswith("FF"):
-                    value = self.CPU.return_register(reg1)
-                    self.CPU.update_register(reg1, value * operand)
-                elif reg1.startswith("V"):
-                    vector = self.CPU.return_register(reg1)
-                    result = [x * operand for x in vector]
-                    self.CPU.update_register(reg1, result)
+                if key.startswith("[") and key.endswith("]"):
+                    try:
+                        vector_literal = [float(x) for x in key[1:-1].split()]
+                        if reg1.startswith("V"):
+                            vector = self.CPU.return_register(reg1)
+                            if len(vector) == len(vector_literal):
+                                result = [x * y for x, y in zip(vector, vector_literal)]
+                                self.CPU.update_register(reg1, result)
+                            else:
+                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
+                        else:
+                            self.report_error(f"Cannot multiply a vector literal with a non-vector register {reg1}")
+                    except ValueError:
+                        self.report_error(f"Invalid vector literal: {key}")
+                else:
+                    try:
+                        operand = float(key)
+                    except:
+                        self.report_error(f"Invalid type for MUL operation. Got: {key}")
+                    if reg1.startswith("I"):
+                        value = self.CPU.return_register(reg1)
+                        if operand.is_integer():
+                            self.CPU.update_register(reg1, value * int(operand))
+                        else:
+                            self.report_error(f"Cannot multiply an integer register {reg1} with a float literal")
+                    elif reg1.startswith("FF"):
+                        value = self.CPU.return_register(reg1)
+                        self.CPU.update_register(reg1, value * operand)
+                    elif reg1.startswith("V"):
+                        vector = self.CPU.return_register(reg1)
+                        result = [x * operand for x in vector]
+                        self.CPU.update_register(reg1, result)
         else:
             self.report_error(f"Invalid register for MUL operation: {reg1}")
 
@@ -433,25 +477,42 @@ class Compiler:
                 else:
                     self.report_error(f"Cannot divide register {reg1} by a {var_type} variable")
             else:
-                try:
-                    operand = float(key)
-                except:
-                    self.report_error(f"Invalid type for DIV operation. Got: {key}")
-                if operand == 0:
-                    self.report_error("Division by zero")
-                if reg1.startswith("I"):
-                    value = self.CPU.return_register(reg1)
-                    if operand.is_integer():
-                        self.CPU.update_register(reg1, value // int(operand))
-                    else:
-                        self.report_error(f"Cannot divide an integer register {reg1} by a float literal")
-                elif reg1.startswith("FF"):
-                    value = self.CPU.return_register(reg1)
-                    self.CPU.update_register(reg1, value / operand)
-                elif reg1.startswith("V"):
-                    vector = self.CPU.return_register(reg1)
-                    result = [x / operand if operand != 0 else 0 for x in vector]
-                    self.CPU.update_register(reg1, result)
+                # Handle vector literals (e.g., [5 6 7])
+                if key.startswith("[") and key.endswith("]"):
+                    try:
+                        # Parse the vector literal
+                        vector_literal = [float(x) for x in key[1:-1].split()]
+                        if reg1.startswith("V"):
+                            vector = self.CPU.return_register(reg1)
+                            if len(vector) == len(vector_literal):
+                                result = [x / y if y != 0 else 0 for x, y in zip(vector, vector_literal)]
+                                self.CPU.update_register(reg1, result)
+                            else:
+                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
+                        else:
+                            self.report_error(f"Cannot divide a vector literal by a non-vector register {reg1}")
+                    except ValueError:
+                        self.report_error(f"Invalid vector literal: {key}")
+                else:
+                    try:
+                        operand = float(key)
+                    except:
+                        self.report_error(f"Invalid type for DIV operation. Got: {key}")
+                    if operand == 0:
+                        self.report_error("Division by zero")
+                    if reg1.startswith("I"):
+                        value = self.CPU.return_register(reg1)
+                        if operand.is_integer():
+                            self.CPU.update_register(reg1, value // int(operand))
+                        else:
+                            self.report_error(f"Cannot divide an integer register {reg1} by a float literal")
+                    elif reg1.startswith("FF"):
+                        value = self.CPU.return_register(reg1)
+                        self.CPU.update_register(reg1, value / operand)
+                    elif reg1.startswith("V"):
+                        vector = self.CPU.return_register(reg1)
+                        result = [x / operand if operand != 0 else 0 for x in vector]
+                        self.CPU.update_register(reg1, result)
         else:
             self.report_error(f"Invalid register for DIV operation: {reg1}")
 
@@ -492,25 +553,42 @@ class Compiler:
                 else:
                     self.report_error(f"Cannot perform modulo on register {reg1} with a {var_type} variable")
             else:
-                try:
-                    operand = float(key)
-                except:
-                    self.report_error(f"Invalid type for MOD operation. Got: {key}")
-                if operand == 0:
-                    self.report_error("Modulo by zero")
-                if reg1.startswith("I"):
-                    value = self.CPU.return_register(reg1)
-                    if operand.is_integer():
-                        self.CPU.update_register(reg1, value % int(operand))
-                    else:
-                        self.report_error(f"Cannot perform modulo on an integer register {reg1} with a float literal")
-                elif reg1.startswith("FF"):
-                    value = self.CPU.return_register(reg1)
-                    self.CPU.update_register(reg1, value % operand)
-                elif reg1.startswith("V"):
-                    vector = self.CPU.return_register(reg1)
-                    result = [x % operand for x in vector]
-                    self.CPU.update_register(reg1, result)
+                if key.startswith("[") and key.endswith("]"):
+                    try:
+                        vector_literal = [float(x) for x in key[1:-1].split()]
+                        if reg1.startswith("V"):
+                            vector = self.CPU.return_register(reg1)
+                            if len(vector) == len(vector_literal):
+                                result = [x % y for x, y in zip(vector, vector_literal)]
+                                self.CPU.update_register(reg1, result)
+                            else:
+                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
+                        else:
+                            self.report_error(
+                                f"Cannot perform modulo on a vector literal with a non-vector register {reg1}")
+                    except ValueError:
+                        self.report_error(f"Invalid vector literal: {key}")
+                else:
+                    try:
+                        operand = float(key)
+                    except:
+                        self.report_error(f"Invalid type for MOD operation. Got: {key}")
+                    if operand == 0:
+                        self.report_error("Modulo by zero")
+                    if reg1.startswith("I"):
+                        value = self.CPU.return_register(reg1)
+                        if operand.is_integer():
+                            self.CPU.update_register(reg1, value % int(operand))
+                        else:
+                            self.report_error(
+                                f"Cannot perform modulo on an integer register {reg1} with a float literal")
+                    elif reg1.startswith("FF"):
+                        value = self.CPU.return_register(reg1)
+                        self.CPU.update_register(reg1, value % operand)
+                    elif reg1.startswith("V"):
+                        vector = self.CPU.return_register(reg1)
+                        result = [x % operand for x in vector]
+                        self.CPU.update_register(reg1, result)
         else:
             self.report_error(f"Invalid register for MOD operation: {reg1}")
 
@@ -532,16 +610,13 @@ class Compiler:
         address = int(address)
         if reg.startswith("V"):
             length = self.CPU.return_memory(address)
-
             if not isinstance(length, int):
                 self.report_error(f"Invalid vector length at address {address}")
                 return
-
             value = [self.CPU.return_memory(address + 1 + i) for i in range(length)]
-            self.cpu_executor.load_mem(reg, value)
         else:
             value = self.CPU.return_memory(address)
-            self.cpu_executor.load_mem(reg, value)
+        self.CPU.update_register(reg, value)
 
     def handle_print(self, key):
         if key in self.reg_names:
@@ -550,12 +625,14 @@ class Compiler:
         try:
             head, buffer, var_type = self.variables[key]
             if var_type == "string":
-                for i in range(buffer):
-                    memory_value = self.CPU.return_memory(head + i)
-                    print(chr(memory_value), end="")
-                print()
+                values = [chr(self.CPU.return_memory(head + i)) for i in range(buffer)]
+                print("".join(values))
+            elif var_type == "vector":
+                values = [str(self.CPU.return_memory(head + i)) for i in range(buffer)]
+                print(f"[{' '.join(values)}]")
             else:
                 print(self.CPU.return_memory(head))
+
         except:
             print(key)
 

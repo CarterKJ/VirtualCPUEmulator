@@ -1,0 +1,3 @@
+VAR x,3;
+VAR y,x; // ps
+PRINT y; // test

@@ -1,3 +1,3 @@
 from CPU.vasm_compiler import Compiler
 
-Compiler("programs/fib.vasm")
+Compiler("programs/test.vasm")
