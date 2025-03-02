@@ -1,0 +1,4 @@
+- have negative numbers for inputs
+- add the dot/mag for vectors
+- add better error messaging for the "parse_operand" function
+- make it so you can parse vectors with vector fragments (this is so stupid)

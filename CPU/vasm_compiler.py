@@ -9,6 +9,7 @@ class Compiler:
         self.asm = self.load_file().split(';')
         self.instruction_index = 0
         self.memory_index = 0
+        self.stack_index = 0
         self.debug = True
         self.instruction_set = {
             "MOVE": self.handle_move,
@@ -23,10 +24,16 @@ class Compiler:
             "TEXT": self.handle_print_ascii,
             "JZ": self.handle_jz,
             "JNZ": self.handle_jnz,
+            "JG": self.handle_jg,
+            "JGE": self.handle_jge,
+            "JL": self.handle_jl,
+            "JLE": self.handle_jle,
             "JMP": self.handle_jmp,
             "HALT": self.handle_halt,
             "VAR": self.handle_set_var,
-            "INPUT": self.handle_input
+            "INPUT": self.handle_input,
+            "PUSH": self.handle_push,
+            "POP": self.handle_pop
         }
         self.variables = {}
         self.functions = {}
@@ -129,510 +136,880 @@ class Compiler:
             self.instruction_index += 1
         self.instruction_index = original_index
 
+    def parse_operand(self, operand):
+        if '[' in operand and operand.endswith(']'):
+            try:
+                base = operand[:operand.index('[')]
+                index_str = operand[operand.index('[') + 1: -1]
+                if index_str in self.reg_names:
+                    if index_str.startswith("V") or index_str.startswith("FF"):
+                        self.report_error("Um what are you even trying to do?")
+                    else:
+                        index = self.CPU.return_register(index_str)
+                elif index_str in self.variables:
+                    head, buffer, var_type = self.variables[base]
+                    if var_type == "vector" or var_type == "float":
+                        self.report_error("Um what are you even trying to do?")
+                    else:
+                        index = self.CPU.return_memory(head)
+                else:
+                    index = int(index_str)
+                return base, index
+            except Exception:
+                return operand, None
+        return operand, None
+
     def handle_move(self, key, value):
-        if key in self.reg_names:
+        target_base, target_index = self.parse_operand(key)
+        if target_base in self.reg_names:
+            if target_index is not None and not target_base.startswith("V"):
+                self.report_error(f"Cannot index non-vector register {target_base}")
+                return
             try:
                 numeric_value = float(value)
-                if key.startswith("I") and numeric_value.is_integer():
-                    self.cpu_executor.move(key, int(numeric_value))
-                elif key.startswith("FF"):
-                    self.cpu_executor.move(key, numeric_value)
+                if target_index is None:
+                    if target_base.startswith("I") and numeric_value.is_integer():
+                        self.cpu_executor.move(target_base, int(numeric_value))
+                    elif target_base.startswith("FF"):
+                        self.cpu_executor.move(target_base, numeric_value)
+                    elif target_base.startswith("V"):
+                        self.report_error(f"Cannot assign scalar to entire vector register {target_base}")
+                    else:
+                        self.report_error(f"Unknown register type for {target_base}")
                 else:
-                    self.report_error(f"Cannot move {numeric_value} to {key} due to type mismatch")
+                    vector = self.CPU.return_register(target_base)
+                    if target_index < 0 or target_index >= len(vector):
+                        self.report_error(f"Index {target_index} out of range for register {target_base}")
+                        return
+                    vector[target_index] = numeric_value
+                    self.CPU.update_register(target_base, vector)
                 return
-            except:
-                if value.startswith("[") and value.endswith("]"):
-                    tokens = value[1:-1].replace(",", " ").split()
-                    if not (1 <= len(tokens) <= 32):
-                        self.report_error(f"Vector length must be between 1 and 32, got {len(tokens)}")
-                    vector = []
-                    for token in tokens:
-                        if token in self.reg_names:
-                            reg_val = self.CPU.return_register(token)
+            except ValueError:
+                pass
+            if value.startswith("[") and value.endswith("]"):
+                if target_index is not None:
+                    self.report_error(f"Cannot assign vector literal to a vector element {target_base}[{target_index}]")
+                    return
+                tokens = value[1:-1].replace(",", " ").split()
+                if not (1 <= len(tokens) <= 32):
+                    self.report_error(f"Vector length must be between 1 and 32, got {len(tokens)}")
+                    return
+                vector = []
+                for token in tokens:
+                    if token in self.reg_names:
+                        reg_val = self.CPU.return_register(token)
+                        try:
                             vector.append(float(reg_val))
-                        elif token in self.variables:
-                            head, buf, typ = self.variables[token]
-                            mem_val = self.CPU.return_memory(head)
-                            vector.append(float(mem_val))
-                        else:
-                            try:
-                                num_val = float(token)
-                                vector.append(num_val)
-                            except:
-                                self.report_error(f"Invalid vector element: {token}")
-                    if key.startswith("V"):
-                        self.CPU.update_register(key, vector)
+                        except Exception:
+                            self.report_error(f"Invalid conversion of register {token} value to float")
+                            return
+                    elif token in self.variables:
+                        head, buf, typ = self.variables[token]
+                        mem_val = self.CPU.return_memory(head)
+                        vector.append(float(mem_val))
                     else:
-                        self.report_error(f"Cannot move vector to {key}, expected a vector register")
-                    return
-                elif value in self.reg_names:
-                    src_value = self.CPU.return_register(value)
-                    if (key.startswith("I") and value.startswith("I")) or (
-                            key.startswith("FF") and value.startswith("FF")) or (
-                            key.startswith("V") and value.startswith("V")):
-                        self.cpu_executor.move(key, src_value)
+                        try:
+                            vector.append(float(token))
+                        except Exception:
+                            self.report_error(f"Invalid vector element: {token}")
+                            return
+                self.CPU.update_register(target_base, vector)
+                return
+            if ('[' in value and value.endswith(']')):
+                src_base, src_index = self.parse_operand(value)
+            else:
+                src_base, src_index = value, None
+
+            if src_base in self.reg_names or src_base in self.variables:
+                if src_base in self.reg_names:
+                    if src_index is None:
+                        src_val = self.CPU.return_register(src_base)
                     else:
-                        self.report_error(f"Cannot move {value} to {key} due to type mismatch")
-                    return
-                elif value in self.variables:
-                    head, buffer, var_type = self.variables[value]
-                    if var_type == "string":
-                        self.report_error(f"Cannot move string variable {value} to register {key}")
-                    elif var_type == "int" and key.startswith("I"):
-                        value_from_mem = self.CPU.return_memory(head)
-                        self.cpu_executor.move(key, int(value_from_mem))
-                    elif var_type == "int" and key.startswith("FF"):
-                        value_from_mem = self.CPU.return_memory(head)
-                        self.cpu_executor.move(key, float(value_from_mem))
-                    elif var_type == "float" and key.startswith("FF"):
-                        value_from_mem = self.CPU.return_memory(head)
-                        self.cpu_executor.move(key, float(value_from_mem))
-                    elif var_type == "vector" and key.startswith("V"):
-                        vector_value = [self.CPU.return_memory(head + i) for i in range(buffer)]
-                        self.CPU.update_register(key, vector_value)
-                    else:
-                        self.report_error(f"Cannot move {value} to {key} due to type mismatch")
-                    return
+                        if not src_base.startswith("V"):
+                            self.report_error(f"Cannot index non-vector register {src_base}")
+                            return
+                        vec = self.CPU.return_register(src_base)
+                        if src_index < 0 or src_index >= len(vec):
+                            self.report_error(f"Index {src_index} out of range for register {src_base}")
+                            return
+                        src_val = vec[src_index]
                 else:
-                    self.report_error(f"Invalid value for MOVE operation: {value}")
-        elif key in self.variables:
-            head, buffer, var_type = self.variables[key]
+                    head, buf, typ = self.variables[src_base]
+                    if src_index is None:
+                        if typ == "vector":
+                            src_val = [self.CPU.return_memory(head + i) for i in range(buf)]
+                        else:
+                            src_val = self.CPU.return_memory(head)
+                    else:
+                        if typ != "vector":
+                            self.report_error(f"Cannot index non-vector variable {src_base}")
+                            return
+                        if src_index < 0 or src_index >= buf:
+                            self.report_error(f"Index {src_index} out of range for variable {src_base}")
+                            return
+                        src_val = self.CPU.return_memory(head + src_index)
+                if target_index is None:
+                    if target_base.startswith("I"):
+                        try:
+                            num = float(src_val)
+                            if num.is_integer():
+                                self.cpu_executor.move(target_base, int(num))
+                            else:
+                                self.report_error(f"Type mismatch: expected integer, got {src_val}")
+                            return
+                        except Exception:
+                            self.report_error(f"Invalid source value: {src_val}")
+                            return
+                    elif target_base.startswith("FF"):
+                        try:
+                            num = float(src_val)
+                            self.cpu_executor.move(target_base, num)
+                            return
+                        except Exception:
+                            self.report_error(f"Invalid source value: {src_val}")
+                            return
+                    elif target_base.startswith("V"):
+                        if isinstance(src_val, list):
+                            self.CPU.update_register(target_base, src_val)
+                            return
+                        else:
+                            self.report_error(f"Expected vector, got scalar for register {target_base}")
+                            return
+                    else:
+                        self.report_error(f"Unknown register type for {target_base}")
+                        return
+                else:
+                    try:
+                        num = float(src_val)
+                    except Exception:
+                        self.report_error(
+                            f"Type mismatch: expected scalar for vector element assignment, got {src_val}")
+                        return
+                    vec = self.CPU.return_register(target_base)
+                    if target_index < 0 or target_index >= len(vec):
+                        self.report_error(f"Index {target_index} out of range for register {target_base}")
+                        return
+                    vec[target_index] = num
+                    self.CPU.update_register(target_base, vec)
+                    return
+            self.report_error(f"Invalid value for MOVE operation: {value}")
+            return
+        elif target_base in self.variables:
+            head, buffer, var_type = self.variables[target_base]
+            if target_index is not None and var_type != "vector":
+                self.report_error(f"Cannot index non-vector variable {target_base}")
+                return
+
             try:
                 numeric_value = float(value)
-                if var_type == "int" and numeric_value.is_integer():
-                    self.CPU.update_memory(head, int(numeric_value))
-                elif var_type == "float":
-                    self.CPU.update_memory(head, numeric_value)
+                if target_index is None:
+                    if var_type == "int" and numeric_value.is_integer():
+                        self.CPU.update_memory(head, int(numeric_value))
+                    elif var_type == "float":
+                        self.CPU.update_memory(head, numeric_value)
+                    else:
+                        self.report_error(f"Cannot move {numeric_value} to {target_base} due to type mismatch")
+                    return
                 else:
-                    self.report_error(f"Cannot move {numeric_value} to {key} due to type mismatch")
+                    if target_index < 0 or target_index >= buffer:
+                        self.report_error(f"Index {target_index} out of range for variable {target_base}")
+                        return
+                    self.CPU.update_memory(head + target_index, numeric_value)
+                    return
+            except ValueError:
+                pass
+            if value.startswith("[") and value.endswith("]"):
+                if target_index is not None:
+                    self.report_error(f"Cannot assign vector literal to a vector element {target_base}[{target_index}]")
+                    return
+                tokens = value[1:-1].replace(",", " ").split()
+                if not (1 <= len(tokens) <= 32):
+                    self.report_error(f"Vector length must be between 1 and 32, got {len(tokens)}")
+                    return
+                for i, token in enumerate(tokens):
+                    if token in self.reg_names:
+                        token_val = self.CPU.return_register(token)
+                        try:
+                            self.CPU.update_memory(head + i, float(token_val))
+                        except Exception:
+                            self.report_error(f"Invalid conversion of register {token} value to float")
+                            return
+                    elif token in self.variables:
+                        t_head, t_buf, t_type = self.variables[token]
+                        token_val = self.CPU.return_memory(t_head)
+                        self.CPU.update_memory(head + i, float(token_val))
+                    else:
+                        try:
+                            token_val = float(token)
+                            self.CPU.update_memory(head + i, token_val)
+                        except Exception:
+                            self.report_error(f"Invalid vector element: {token}")
+                            return
+                self.variables[target_base] = [head, len(tokens), "vector"]
                 return
-            except:
-                if value.startswith("[") and value.endswith("]"):
-                    tokens = value[1:-1].replace(",", " ").split()
-                    if not (1 <= len(tokens) <= 32):
-                        self.report_error(f"Vector length must be between 1 and 32, got {len(tokens)}")
-                    for i, token in enumerate(tokens):
-                        if token in self.reg_names:
-                            token_val = self.CPU.return_register(token)
-                            self.CPU.update_memory(head + i, float(token_val))
-                        elif token in self.variables:
-                            t_head, t_buf, t_type = self.variables[token]
-                            token_val = self.CPU.return_memory(t_head)
-                            self.CPU.update_memory(head + i, float(token_val))
-                        else:
-                            try:
-                                token_val = float(token)
-                                self.CPU.update_memory(head + i, token_val)
-                            except:
-                                self.report_error(f"Invalid vector element: {token}")
-                    self.variables[key] = [head, len(tokens), "vector"]
-                    return
+            if ('[' in value and value.endswith(']')):
+                src_base, src_index = self.parse_operand(value)
+            else:
+                src_base, src_index = value, None
+
+            if src_base in self.reg_names or src_base in self.variables:
+                if src_base in self.reg_names:
+                    if src_index is None:
+                        src_val = self.CPU.return_register(src_base)
+                    else:
+                        if not src_base.startswith("V"):
+                            self.report_error(f"Cannot index non-vector register {src_base}")
+                            return
+                        vec = self.CPU.return_register(src_base)
+                        if src_index < 0 or src_index >= len(vec):
+                            self.report_error(f"Index {src_index} out of range for register {src_base}")
+                            return
+                        src_val = vec[src_index]
                 else:
-                    values = [ord(char) for char in value.replace('"', "")]
-                    if len(values) > buffer:
-                        self.report_error(f"Memory buffer overflow by {len(values) - buffer} bytes")
-                    for i, v in enumerate(values):
-                        self.CPU.update_memory(head + i, v)
-                    self.variables[key] = [head, buffer, "string"]
+                    t_head, t_buf, t_type = self.variables[src_base]
+                    if src_index is None:
+                        if t_type == "vector":
+                            src_val = [self.CPU.return_memory(t_head + i) for i in range(t_buf)]
+                        else:
+                            src_val = self.CPU.return_memory(t_head)
+                    else:
+                        if t_type != "vector":
+                            self.report_error(f"Cannot index non-vector variable {src_base}")
+                            return
+                        if src_index < 0 or src_index >= t_buf:
+                            self.report_error(f"Index {src_index} out of range for variable {src_base}")
+                            return
+                        src_val = self.CPU.return_memory(t_head + src_index)
+                if target_index is None:
+                    if var_type == "int":
+                        try:
+                            num = float(src_val)
+                            if num.is_integer():
+                                self.CPU.update_memory(head, int(num))
+                            else:
+                                self.report_error(f"Type mismatch: expected integer, got {src_val}")
+                            return
+                        except Exception:
+                            self.report_error(f"Invalid source value: {src_val}")
+                            return
+                    elif var_type == "float":
+                        try:
+                            num = float(src_val)
+                            self.CPU.update_memory(head, num)
+                            return
+                        except Exception:
+                            self.report_error(f"Invalid source value: {src_val}")
+                            return
+                    elif var_type == "vector":
+                        if isinstance(src_val, list):
+                            for i, elem in enumerate(src_val):
+                                self.CPU.update_memory(head + i, elem)
+                            self.variables[target_base] = [head, len(src_val), "vector"]
+                            return
+                        else:
+                            self.report_error(f"Expected vector, got scalar for variable {target_base}")
+                            return
+                    else:
+                        self.report_error(f"Unknown variable type for {target_base}")
+                        return
+                else:
+                    try:
+                        num = float(src_val)
+                    except Exception:
+                        self.report_error(
+                            f"Type mismatch: expected scalar for vector element assignment, got {src_val}")
+                        return
+                    if target_index < 0 or target_index >= buffer:
+                        self.report_error(f"Index {target_index} out of range for variable {target_base}")
+                        return
+                    self.CPU.update_memory(head + target_index, num)
                     return
+            values = [ord(char) for char in value.replace('"', "")]
+            if len(values) > buffer:
+                self.report_error(f"Memory buffer overflow by {len(values) - buffer} bytes")
+                return
+            for i, v in enumerate(values):
+                self.CPU.update_memory(head + i, v)
+            self.variables[target_base] = [head, buffer, "string"]
+            return
         else:
             self.report_error(f"Invalid key for MOVE operation: {key}")
+            return
 
     def handle_add(self, reg1, key):
-        if reg1 in self.reg_names:
-            if key in self.reg_names:
-                self.cpu_executor.add(reg1, key)
-            elif key in self.variables:
-                head, buffer, var_type = self.variables[key]
-                if var_type == "int" or var_type == "float":
-                    value = self.CPU.return_memory(head)
-                    if reg1.startswith("I"):
-                        if var_type == "int":
-                            self.CPU.update_register(reg1, self.CPU.return_register(reg1) + int(value))
-                        else:
-                            self.report_error(f"Cannot add a float variable to an integer register {reg1}")
-                    elif reg1.startswith("FF"):
-                        self.CPU.update_register(reg1, self.CPU.return_register(reg1) + float(value))
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x + float(value) for x in vector]
-                        self.CPU.update_register(reg1, result)
-                elif var_type == "vector":
-                    if reg1.startswith("V"):
-                        vector1 = self.CPU.return_register(reg1)
-                        vector2 = [self.CPU.return_memory(head + i) for i in range(buffer)]
-                        if len(vector1) == len(vector2):
-                            result = [x + y for x, y in zip(vector1, vector2)]
-                            self.CPU.update_register(reg1, result)
-                        else:
-                            self.report_error(f"Vector size mismatch: {len(vector1)} != {len(vector2)}")
-                    else:
-                        self.report_error(f"Cannot add a vector variable to a non-vector register {reg1}")
+        rbase, rindex = self.parse_operand(reg1)
+        kbase, kindex = self.parse_operand(key)
+        if rbase in self.reg_names:
+            if kbase in self.reg_names:
+                if kindex is not None:
+                    vec2 = self.CPU.return_register(kbase)
+                    if kindex < 0 or kindex >= len(vec2):
+                        self.report_error("Index out of range for " + kbase)
+                        return
+                    op = vec2[kindex]
                 else:
-                    self.report_error(f"Cannot add a {var_type} variable to register {reg1}")
+                    op = self.CPU.return_register(kbase)
+            elif kbase in self.variables:
+                head, buf, var_type = self.variables[kbase]
+                if var_type in ("int", "float"):
+                    op = float(self.CPU.return_memory(head))
+                elif var_type == "vector":
+                    if kindex is not None:
+                        if kindex < 0 or kindex >= buf:
+                            self.report_error("Index out of range for variable " + kbase)
+                            return
+                        op = self.CPU.return_memory(head + kindex)
+                    else:
+                        op = [self.CPU.return_memory(head + i) for i in range(buf)]
+                else:
+                    self.report_error("Cannot add a " + var_type + " variable to register " + rbase)
+                    return
             else:
                 if key.startswith("[") and key.endswith("]"):
                     try:
-                        vector_literal = [float(x) for x in key[1:-1].split()]
-                        if reg1.startswith("V"):
-                            vector = self.CPU.return_register(reg1)
-                            if len(vector) == len(vector_literal):
-                                result = [x + y for x, y in zip(vector, vector_literal)]
-                                self.CPU.update_register(reg1, result)
-                            else:
-                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
-                        else:
-                            self.report_error(f"Cannot add a vector literal to a non-vector register {reg1}")
-                    except ValueError:
-                        self.report_error(f"Invalid vector literal: {key}")
+                        tokens = key[1:-1].split()
+                        op = [float(x) for x in tokens]
+                    except:
+                        self.report_error("Invalid vector literal: " + key)
+                        return
                 else:
                     try:
-                        operand = float(key)
+                        op = float(key)
                     except:
-                        self.report_error(f"Invalid type for ADD operation. Got: {key}")
-                    if reg1.startswith("I"):
-                        value = self.CPU.return_register(reg1)
-                        if operand.is_integer():
-                            self.CPU.update_register(reg1, value + int(operand))
-                        else:
-                            self.report_error(f"Cannot add a float literal to an integer register {reg1}")
-                    elif reg1.startswith("FF"):
-                        value = self.CPU.return_register(reg1)
-                        self.CPU.update_register(reg1, value + operand)
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x + operand for x in vector]
-                        self.CPU.update_register(reg1, result)
+                        self.report_error("Invalid type for ADD operation. Got: " + key)
+                        return
+            if rindex is None:
+                if rbase.startswith("I"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot add vector to integer register " + rbase)
+                        return
+                    val = self.CPU.return_register(rbase)
+                    if float(op).is_integer():
+                        self.CPU.update_register(rbase, val + int(op))
+                    else:
+                        self.report_error("Cannot add float to integer register " + rbase)
+                        return
+                elif rbase.startswith("FF"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot add vector to float register " + rbase)
+                        return
+                    val = self.CPU.return_register(rbase)
+                    self.CPU.update_register(rbase, val + float(op))
+                elif rbase.startswith("V"):
+                    vec = self.CPU.return_register(rbase)
+                    if isinstance(op, list):
+                        if len(vec) != len(op):
+                            self.report_error("Vector size mismatch: " + str(len(vec)) + " != " + str(len(op)))
+                            return
+                        self.CPU.update_register(rbase, [x + y for x, y in zip(vec, op)])
+                    else:
+                        self.CPU.update_register(rbase, [x + op for x in vec])
+            else:
+                if not rbase.startswith("V"):
+                    self.report_error("Cannot index non-vector register " + rbase)
+                    return
+                vec = self.CPU.return_register(rbase)
+                if rindex < 0 or rindex >= len(vec):
+                    self.report_error("Index out of range for register " + rbase)
+                    return
+                elem = vec[rindex]
+                if isinstance(op, list):
+                    self.report_error("Cannot add vector literal to vector element")
+                    return
+                if rbase.startswith("I"):
+                    if float(op).is_integer():
+                        vec[rindex] = elem + int(op)
+                    else:
+                        self.report_error("Cannot add float to integer register element " + rbase)
+                        return
+                else:
+                    vec[rindex] = elem + float(op)
+                self.CPU.update_register(rbase, vec)
         else:
-            self.report_error(f"Invalid register for ADD operation: {reg1}")
+            self.report_error("Invalid register for ADD operation: " + reg1)
 
     def handle_sub(self, reg1, key):
-        if reg1 in self.reg_names:
-            if key in self.reg_names:
-                self.cpu_executor.sub(reg1, key)
-            elif key in self.variables:
-                head, buffer, var_type = self.variables[key]
-                if var_type == "int" or var_type == "float":
-                    value = self.CPU.return_memory(head)
-                    if reg1.startswith("I"):
-                        if var_type == "int":
-                            self.CPU.update_register(reg1, self.CPU.return_register(reg1) - int(value))
-                        else:
-                            self.report_error(f"Cannot subtract a float variable from an integer register {reg1}")
-                    elif reg1.startswith("FF"):
-                        self.CPU.update_register(reg1, self.CPU.return_register(reg1) - float(value))
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x - float(value) for x in vector]
-                        self.CPU.update_register(reg1, result)
-                elif var_type == "vector":
-                    if reg1.startswith("V"):
-                        vector1 = self.CPU.return_register(reg1)
-                        vector2 = [self.CPU.return_memory(head + i) for i in range(buffer)]
-                        if len(vector1) == len(vector2):
-                            result = [x - y for x, y in zip(vector1, vector2)]
-                            self.CPU.update_register(reg1, result)
-                        else:
-                            self.report_error(f"Vector size mismatch: {len(vector1)} != {len(vector2)}")
-                    else:
-                        self.report_error(f"Cannot subtract a vector variable from a non-vector register {reg1}")
+        rbase, rindex = self.parse_operand(reg1)
+        kbase, kindex = self.parse_operand(key)
+        if rbase in self.reg_names:
+            if kbase in self.reg_names:
+                if kindex is not None:
+                    vec2 = self.CPU.return_register(kbase)
+                    if kindex < 0 or kindex >= len(vec2):
+                        self.report_error("Index out of range for " + kbase)
+                        return
+                    op = vec2[kindex]
                 else:
-                    self.report_error(f"Cannot subtract a {var_type} variable from register {reg1}")
+                    op = self.CPU.return_register(kbase)
+            elif kbase in self.variables:
+                head, buf, var_type = self.variables[kbase]
+                if var_type in ("int", "float"):
+                    op = float(self.CPU.return_memory(head))
+                elif var_type == "vector":
+                    if kindex is not None:
+                        if kindex < 0 or kindex >= buf:
+                            self.report_error("Index out of range for variable " + kbase)
+                            return
+                        op = self.CPU.return_memory(head + kindex)
+                    else:
+                        op = [self.CPU.return_memory(head + i) for i in range(buf)]
+                else:
+                    self.report_error("Cannot subtract a " + var_type + " variable from register " + rbase)
+                    return
             else:
                 if key.startswith("[") and key.endswith("]"):
                     try:
-                        vector_literal = [float(x) for x in key[1:-1].split()]
-                        if reg1.startswith("V"):
-                            vector = self.CPU.return_register(reg1)
-                            if len(vector) == len(vector_literal):
-                                result = [x - y for x, y in zip(vector, vector_literal)]
-                                self.CPU.update_register(reg1, result)
-                            else:
-                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
-                        else:
-                            self.report_error(f"Cannot subtract a vector literal from a non-vector register {reg1}")
-                    except ValueError:
-                        self.report_error(f"Invalid vector literal: {key}")
+                        tokens = key[1:-1].split()
+                        op = [float(x) for x in tokens]
+                    except:
+                        self.report_error("Invalid vector literal: " + key)
+                        return
                 else:
                     try:
-                        operand = float(key)
+                        op = float(key)
                     except:
-                        self.report_error(f"Invalid type for SUB operation. Got: {key}")
-                    if reg1.startswith("I"):
-                        value = self.CPU.return_register(reg1)
-                        if operand.is_integer():
-                            self.CPU.update_register(reg1, value - int(operand))
-                        else:
-                            self.report_error(f"Cannot subtract a float literal from an integer register {reg1}")
-                    elif reg1.startswith("FF"):
-                        value = self.CPU.return_register(reg1)
-                        self.CPU.update_register(reg1, value - operand)
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x - operand for x in vector]
-                        self.CPU.update_register(reg1, result)
+                        self.report_error("Invalid type for SUB operation. Got: " + key)
+                        return
+            if rindex is None:
+                if rbase.startswith("I"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot subtract vector from integer register " + rbase)
+                        return
+                    val = self.CPU.return_register(rbase)
+                    if float(op).is_integer():
+                        self.CPU.update_register(rbase, val - int(op))
+                    else:
+                        self.report_error("Cannot subtract float from integer register " + rbase)
+                        return
+                elif rbase.startswith("FF"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot subtract vector from float register " + rbase)
+                        return
+                    val = self.CPU.return_register(rbase)
+                    self.CPU.update_register(rbase, val - float(op))
+                elif rbase.startswith("V"):
+                    vec = self.CPU.return_register(rbase)
+                    if isinstance(op, list):
+                        if len(vec) != len(op):
+                            self.report_error("Vector size mismatch: " + str(len(vec)) + " != " + str(len(op)))
+                            return
+                        self.CPU.update_register(rbase, [x - y for x, y in zip(vec, op)])
+                    else:
+                        self.CPU.update_register(rbase, [x - op for x in vec])
+            else:
+                if not rbase.startswith("V"):
+                    self.report_error("Cannot index non-vector register " + rbase)
+                    return
+                vec = self.CPU.return_register(rbase)
+                if rindex < 0 or rindex >= len(vec):
+                    self.report_error("Index out of range for register " + rbase)
+                    return
+                elem = vec[rindex]
+                if isinstance(op, list):
+                    self.report_error("Cannot subtract vector literal from vector element")
+                    return
+                if rbase.startswith("I"):
+                    if float(op).is_integer():
+                        vec[rindex] = elem - int(op)
+                    else:
+                        self.report_error("Cannot subtract float from integer register element " + rbase)
+                        return
+                else:
+                    vec[rindex] = elem - float(op)
+                self.CPU.update_register(rbase, vec)
         else:
-            self.report_error(f"Invalid register for SUB operation: {reg1}")
+            self.report_error("Invalid register for SUB operation: " + reg1)
 
     def handle_mul(self, reg1, key):
-        if reg1 in self.reg_names:
-            if key in self.reg_names:
-                self.cpu_executor.mul(reg1, key)
-            elif key in self.variables:
-                head, buffer, var_type = self.variables[key]
-                if var_type == "int" or var_type == "float":
-                    value = self.CPU.return_memory(head)
-                    if reg1.startswith("I"):
-                        if var_type == "int":
-                            self.CPU.update_register(reg1, self.CPU.return_register(reg1) * int(value))
-                        else:
-                            self.report_error(f"Cannot multiply an integer register {reg1} with a float variable")
-                    elif reg1.startswith("FF"):
-                        self.CPU.update_register(reg1, self.CPU.return_register(reg1) * float(value))
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x * float(value) for x in vector]
-                        self.CPU.update_register(reg1, result)
-                elif var_type == "vector":
-                    if reg1.startswith("V"):
-                        vector1 = self.CPU.return_register(reg1)
-                        vector2 = [self.CPU.return_memory(head + i) for i in range(buffer)]
-                        if len(vector1) == len(vector2):
-                            result = [x * y for x, y in zip(vector1, vector2)]
-                            self.CPU.update_register(reg1, result)
-                        else:
-                            self.report_error(f"Vector size mismatch: {len(vector1)} != {len(vector2)}")
-                    else:
-                        self.report_error(f"Cannot multiply a vector variable with a non-vector register {reg1}")
+        rbase, rindex = self.parse_operand(reg1)
+        kbase, kindex = self.parse_operand(key)
+        if rbase in self.reg_names:
+            if kbase in self.reg_names:
+                if kindex is not None:
+                    vec2 = self.CPU.return_register(kbase)
+                    if kindex < 0 or kindex >= len(vec2):
+                        self.report_error("Index out of range for " + kbase)
+                        return
+                    op = vec2[kindex]
                 else:
-                    self.report_error(f"Cannot multiply a {var_type} variable with register {reg1}")
+                    op = self.CPU.return_register(kbase)
+            elif kbase in self.variables:
+                head, buf, var_type = self.variables[kbase]
+                if var_type in ("int", "float"):
+                    op = float(self.CPU.return_memory(head))
+                elif var_type == "vector":
+                    if kindex is not None:
+                        if kindex < 0 or kindex >= buf:
+                            self.report_error("Index out of range for variable " + kbase)
+                            return
+                        op = self.CPU.return_memory(head + kindex)
+                    else:
+                        op = [self.CPU.return_memory(head + i) for i in range(buf)]
+                else:
+                    self.report_error("Cannot multiply a " + var_type + " variable with register " + rbase)
+                    return
             else:
                 if key.startswith("[") and key.endswith("]"):
                     try:
-                        vector_literal = [float(x) for x in key[1:-1].split()]
-                        if reg1.startswith("V"):
-                            vector = self.CPU.return_register(reg1)
-                            if len(vector) == len(vector_literal):
-                                result = [x * y for x, y in zip(vector, vector_literal)]
-                                self.CPU.update_register(reg1, result)
-                            else:
-                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
-                        else:
-                            self.report_error(f"Cannot multiply a vector literal with a non-vector register {reg1}")
-                    except ValueError:
-                        self.report_error(f"Invalid vector literal: {key}")
+                        tokens = key[1:-1].split()
+                        op = [float(x) for x in tokens]
+                    except:
+                        self.report_error("Invalid vector literal: " + key)
+                        return
                 else:
                     try:
-                        operand = float(key)
+                        op = float(key)
                     except:
-                        self.report_error(f"Invalid type for MUL operation. Got: {key}")
-                    if reg1.startswith("I"):
-                        value = self.CPU.return_register(reg1)
-                        if operand.is_integer():
-                            self.CPU.update_register(reg1, value * int(operand))
-                        else:
-                            self.report_error(f"Cannot multiply an integer register {reg1} with a float literal")
-                    elif reg1.startswith("FF"):
-                        value = self.CPU.return_register(reg1)
-                        self.CPU.update_register(reg1, value * operand)
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x * operand for x in vector]
-                        self.CPU.update_register(reg1, result)
+                        self.report_error("Invalid type for MUL operation. Got: " + key)
+                        return
+            if rindex is None:
+                if rbase.startswith("I"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot multiply integer register " + rbase + " with vector")
+                        return
+                    val = self.CPU.return_register(rbase)
+                    if float(op).is_integer():
+                        self.CPU.update_register(rbase, val * int(op))
+                    else:
+                        self.report_error("Cannot multiply integer register " + rbase + " with float")
+                        return
+                elif rbase.startswith("FF"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot multiply float register " + rbase + " with vector")
+                        return
+                    val = self.CPU.return_register(rbase)
+                    self.CPU.update_register(rbase, val * float(op))
+                elif rbase.startswith("V"):
+                    vec = self.CPU.return_register(rbase)
+                    if isinstance(op, list):
+                        if len(vec) != len(op):
+                            self.report_error("Vector size mismatch: " + str(len(vec)) + " != " + str(len(op)))
+                            return
+                        self.CPU.update_register(rbase, [x * y for x, y in zip(vec, op)])
+                    else:
+                        self.CPU.update_register(rbase, [x * op for x in vec])
+            else:
+                if not rbase.startswith("V"):
+                    self.report_error("Cannot index non-vector register " + rbase)
+                    return
+                vec = self.CPU.return_register(rbase)
+                if rindex < 0 or rindex >= len(vec):
+                    self.report_error("Index out of range for register " + rbase)
+                    return
+                elem = vec[rindex]
+                if isinstance(op, list):
+                    self.report_error("Cannot multiply vector literal with vector element")
+                    return
+                if rbase.startswith("I"):
+                    if float(op).is_integer():
+                        vec[rindex] = elem * int(op)
+                    else:
+                        self.report_error("Cannot multiply integer register element " + rbase + " with float")
+                        return
+                else:
+                    vec[rindex] = elem * float(op)
+                self.CPU.update_register(rbase, vec)
         else:
-            self.report_error(f"Invalid register for MUL operation: {reg1}")
+            self.report_error("Invalid register for MUL operation: " + reg1)
 
     def handle_div(self, reg1, key):
-        if reg1 in self.reg_names:
-            if key in self.reg_names:
-                self.cpu_executor.div(reg1, key)
-            elif key in self.variables:
-                head, buffer, var_type = self.variables[key]
-                if var_type == "int" or var_type == "float":
-                    value = self.CPU.return_memory(head)
-                    if value == 0:
-                        self.report_error("Division by zero")
-                    if reg1.startswith("I"):
-                        if var_type == "int":
-                            self.CPU.update_register(reg1, self.CPU.return_register(reg1) // int(value))
-                        else:
-                            self.report_error(f"Cannot divide an integer register {reg1} by a float variable")
-                    elif reg1.startswith("FF"):
-                        self.CPU.update_register(reg1, self.CPU.return_register(reg1) / float(value))
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x / float(value) if value != 0 else 0 for x in vector]
-                        self.CPU.update_register(reg1, result)
-                elif var_type == "vector":
-                    if reg1.startswith("V"):
-                        vector1 = self.CPU.return_register(reg1)
-                        vector2 = [self.CPU.return_memory(head + i) for i in range(buffer)]
-                        if len(vector1) == len(vector2):
-                            result = [x / y if y != 0 else 0 for x, y in zip(vector1, vector2)]
-                            self.CPU.update_register(reg1, result)
-                        else:
-                            self.report_error(f"Vector size mismatch: {len(vector1)} != {len(vector2)}")
-                    else:
-                        self.report_error(f"Cannot divide a vector variable by a non-vector register {reg1}")
+        rbase, rindex = self.parse_operand(reg1)
+        kbase, kindex = self.parse_operand(key)
+        if rbase in self.reg_names:
+            if kbase in self.reg_names:
+                if kindex is not None:
+                    vec2 = self.CPU.return_register(kbase)
+                    if kindex < 0 or kindex >= len(vec2):
+                        self.report_error("Index out of range for " + kbase)
+                        return
+                    op = vec2[kindex]
                 else:
-                    self.report_error(f"Cannot divide register {reg1} by a {var_type} variable")
+                    op = self.CPU.return_register(kbase)
+            elif kbase in self.variables:
+                head, buf, var_type = self.variables[kbase]
+                if var_type in ("int", "float"):
+                    op = float(self.CPU.return_memory(head))
+                elif var_type == "vector":
+                    if kindex is not None:
+                        if kindex < 0 or kindex >= buf:
+                            self.report_error("Index out of range for variable " + kbase)
+                            return
+                        op = self.CPU.return_memory(head + kindex)
+                    else:
+                        op = [self.CPU.return_memory(head + i) for i in range(buf)]
+                else:
+                    self.report_error("Cannot divide register " + rbase + " by a " + var_type + " variable")
+                    return
             else:
-                # Handle vector literals (e.g., [5 6 7])
                 if key.startswith("[") and key.endswith("]"):
                     try:
-                        # Parse the vector literal
-                        vector_literal = [float(x) for x in key[1:-1].split()]
-                        if reg1.startswith("V"):
-                            vector = self.CPU.return_register(reg1)
-                            if len(vector) == len(vector_literal):
-                                result = [x / y if y != 0 else 0 for x, y in zip(vector, vector_literal)]
-                                self.CPU.update_register(reg1, result)
-                            else:
-                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
-                        else:
-                            self.report_error(f"Cannot divide a vector literal by a non-vector register {reg1}")
-                    except ValueError:
-                        self.report_error(f"Invalid vector literal: {key}")
+                        tokens = key[1:-1].split()
+                        op = [float(x) for x in tokens]
+                    except:
+                        self.report_error("Invalid vector literal: " + key)
+                        return
                 else:
                     try:
-                        operand = float(key)
+                        op = float(key)
                     except:
-                        self.report_error(f"Invalid type for DIV operation. Got: {key}")
-                    if operand == 0:
-                        self.report_error("Division by zero")
-                    if reg1.startswith("I"):
-                        value = self.CPU.return_register(reg1)
-                        if operand.is_integer():
-                            self.CPU.update_register(reg1, value // int(operand))
-                        else:
-                            self.report_error(f"Cannot divide an integer register {reg1} by a float literal")
-                    elif reg1.startswith("FF"):
-                        value = self.CPU.return_register(reg1)
-                        self.CPU.update_register(reg1, value / operand)
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x / operand if operand != 0 else 0 for x in vector]
-                        self.CPU.update_register(reg1, result)
+                        self.report_error("Invalid type for DIV operation. Got: " + key)
+                        return
+            if (isinstance(op, (int, float)) and float(op) == 0) or (
+                    isinstance(op, list) and any(float(x) == 0 for x in op)):
+                self.report_error("Division by zero")
+                return
+            if rindex is None:
+                if rbase.startswith("I"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot divide integer register " + rbase + " by vector")
+                        return
+                    val = self.CPU.return_register(rbase)
+                    if float(op).is_integer():
+                        self.CPU.update_register(rbase, val // int(op))
+                    else:
+                        self.report_error("Cannot divide integer register " + rbase + " by float")
+                        return
+                elif rbase.startswith("FF"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot divide float register " + rbase + " by vector")
+                        return
+                    val = self.CPU.return_register(rbase)
+                    self.CPU.update_register(rbase, val / float(op))
+                elif rbase.startswith("V"):
+                    vec = self.CPU.return_register(rbase)
+                    if isinstance(op, list):
+                        if len(vec) != len(op):
+                            self.report_error("Vector size mismatch: " + str(len(vec)) + " != " + str(len(op)))
+                            return
+                        result = [x / y if float(y) != 0 else 0 for x, y in zip(vec, op)]
+                        self.CPU.update_register(rbase, result)
+                    else:
+                        self.CPU.update_register(rbase, [x / float(op) if float(op) != 0 else 0 for x in vec])
+            else:
+                if not rbase.startswith("V"):
+                    self.report_error("Cannot index non-vector register " + rbase)
+                    return
+                vec = self.CPU.return_register(rbase)
+                if rindex < 0 or rindex >= len(vec):
+                    self.report_error("Index out of range for register " + rbase)
+                    return
+                elem = vec[rindex]
+                if isinstance(op, list):
+                    self.report_error("Cannot divide by vector literal for a single element")
+                    return
+                if float(op) == 0:
+                    self.report_error("Division by zero")
+                    return
+                if rbase.startswith("I"):
+                    if float(op).is_integer():
+                        vec[rindex] = elem // int(op)
+                    else:
+                        self.report_error("Cannot divide integer register element " + rbase + " by float")
+                        return
+                else:
+                    vec[rindex] = elem / float(op)
+                self.CPU.update_register(rbase, vec)
         else:
-            self.report_error(f"Invalid register for DIV operation: {reg1}")
+            self.report_error("Invalid register for DIV operation: " + reg1)
 
     def handle_mod(self, reg1, key):
-        if reg1 in self.reg_names:
-            if key in self.reg_names:
-                self.cpu_executor.mod(reg1, key)
-            elif key in self.variables:
-                head, buffer, var_type = self.variables[key]
-                if var_type == "int" or var_type == "float":
-                    value = self.CPU.return_memory(head)
-                    if value == 0:
-                        self.report_error("Modulo by zero")
-                    if reg1.startswith("I"):
-                        if var_type == "int":
-                            self.CPU.update_register(reg1, self.CPU.return_register(reg1) % int(value))
-                        else:
-                            self.report_error(
-                                f"Cannot perform modulo on an integer register {reg1} with a float variable")
-                    elif reg1.startswith("FF"):
-                        self.CPU.update_register(reg1, self.CPU.return_register(reg1) % float(value))
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x % float(value) for x in vector]
-                        self.CPU.update_register(reg1, result)
-                elif var_type == "vector":
-                    if reg1.startswith("V"):
-                        vector1 = self.CPU.return_register(reg1)
-                        vector2 = [self.CPU.return_memory(head + i) for i in range(buffer)]
-                        if len(vector1) == len(vector2):
-                            result = [x % y for x, y in zip(vector1, vector2)]
-                            self.CPU.update_register(reg1, result)
-                        else:
-                            self.report_error(f"Vector size mismatch: {len(vector1)} != {len(vector2)}")
-                    else:
-                        self.report_error(
-                            f"Cannot perform modulo on a vector variable with a non-vector register {reg1}")
+        rbase, rindex = self.parse_operand(reg1)
+        kbase, kindex = self.parse_operand(key)
+        if rbase in self.reg_names:
+            if kbase in self.reg_names:
+                if kindex is not None:
+                    vec2 = self.CPU.return_register(kbase)
+                    if kindex < 0 or kindex >= len(vec2):
+                        self.report_error("Index out of range for " + kbase)
+                        return
+                    op = vec2[kindex]
                 else:
-                    self.report_error(f"Cannot perform modulo on register {reg1} with a {var_type} variable")
+                    op = self.CPU.return_register(kbase)
+            elif kbase in self.variables:
+                head, buf, var_type = self.variables[kbase]
+                if var_type in ("int", "float"):
+                    op = float(self.CPU.return_memory(head))
+                elif var_type == "vector":
+                    if kindex is not None:
+                        if kindex < 0 or kindex >= buf:
+                            self.report_error("Index out of range for variable " + kbase)
+                            return
+                        op = self.CPU.return_memory(head + kindex)
+                    else:
+                        op = [self.CPU.return_memory(head + i) for i in range(buf)]
+                else:
+                    self.report_error(
+                        "Cannot perform modulo on register " + rbase + " with a " + var_type + " variable")
+                    return
             else:
                 if key.startswith("[") and key.endswith("]"):
                     try:
-                        vector_literal = [float(x) for x in key[1:-1].split()]
-                        if reg1.startswith("V"):
-                            vector = self.CPU.return_register(reg1)
-                            if len(vector) == len(vector_literal):
-                                result = [x % y for x, y in zip(vector, vector_literal)]
-                                self.CPU.update_register(reg1, result)
-                            else:
-                                self.report_error(f"Vector size mismatch: {len(vector)} != {len(vector_literal)}")
-                        else:
-                            self.report_error(
-                                f"Cannot perform modulo on a vector literal with a non-vector register {reg1}")
-                    except ValueError:
-                        self.report_error(f"Invalid vector literal: {key}")
+                        tokens = key[1:-1].split()
+                        op = [float(x) for x in tokens]
+                    except:
+                        self.report_error("Invalid vector literal: " + key)
+                        return
                 else:
                     try:
-                        operand = float(key)
+                        op = float(key)
                     except:
-                        self.report_error(f"Invalid type for MOD operation. Got: {key}")
-                    if operand == 0:
-                        self.report_error("Modulo by zero")
-                    if reg1.startswith("I"):
-                        value = self.CPU.return_register(reg1)
-                        if operand.is_integer():
-                            self.CPU.update_register(reg1, value % int(operand))
-                        else:
-                            self.report_error(
-                                f"Cannot perform modulo on an integer register {reg1} with a float literal")
-                    elif reg1.startswith("FF"):
-                        value = self.CPU.return_register(reg1)
-                        self.CPU.update_register(reg1, value % operand)
-                    elif reg1.startswith("V"):
-                        vector = self.CPU.return_register(reg1)
-                        result = [x % operand for x in vector]
-                        self.CPU.update_register(reg1, result)
+                        self.report_error("Invalid type for MOD operation. Got: " + key)
+                        return
+            if (isinstance(op, (int, float)) and float(op) == 0) or (
+                    isinstance(op, list) and any(float(x) == 0 for x in op)):
+                self.report_error("Modulo by zero")
+                return
+            if rindex is None:
+                if rbase.startswith("I"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot perform modulo on integer register " + rbase + " with vector")
+                        return
+                    val = self.CPU.return_register(rbase)
+                    if float(op).is_integer():
+                        self.CPU.update_register(rbase, val % int(op))
+                    else:
+                        self.report_error("Cannot perform modulo on integer register " + rbase + " with float")
+                        return
+                elif rbase.startswith("FF"):
+                    if isinstance(op, list):
+                        self.report_error("Cannot perform modulo on float register " + rbase + " with vector")
+                        return
+                    val = self.CPU.return_register(rbase)
+                    self.CPU.update_register(rbase, val % float(op))
+                elif rbase.startswith("V"):
+                    vec = self.CPU.return_register(rbase)
+                    if isinstance(op, list):
+                        if len(vec) != len(op):
+                            self.report_error("Vector size mismatch: " + str(len(vec)) + " != " + str(len(op)))
+                            return
+                        self.CPU.update_register(rbase, [x % y for x, y in zip(vec, op)])
+                    else:
+                        self.CPU.update_register(rbase, [x % float(op) for x in vec])
+            else:
+                if not rbase.startswith("V"):
+                    self.report_error("Cannot index non-vector register " + rbase)
+                    return
+                vec = self.CPU.return_register(rbase)
+                if rindex < 0 or rindex >= len(vec):
+                    self.report_error("Index out of range for register " + rbase)
+                    return
+                elem = vec[rindex]
+                if isinstance(op, list):
+                    self.report_error("Cannot perform modulo with vector literal for a single element")
+                    return
+                if float(op) == 0:
+                    self.report_error("Modulo by zero")
+                    return
+                if rbase.startswith("I"):
+                    if float(op).is_integer():
+                        vec[rindex] = elem % int(op)
+                    else:
+                        self.report_error("Cannot perform modulo on integer register element " + rbase + " with float")
+                        return
+                else:
+                    vec[rindex] = elem % float(op)
+                self.CPU.update_register(rbase, vec)
         else:
-            self.report_error(f"Invalid register for MOD operation: {reg1}")
+            self.report_error("Invalid register for MOD operation: " + reg1)
 
     def handle_store(self, reg, address):
         address = int(address)
-        if reg in self.reg_names:
-            value = self.CPU.return_register(reg)
-
-            if isinstance(value, list) and reg.startswith("V"):
-                self.CPU.update_memory(address, len(value))
-                for i, v in enumerate(value):
-                    self.CPU.update_memory(address + 1 + i, v)
+        base, idx = self.parse_operand(reg)
+        if base in self.reg_names:
+            value = self.CPU.return_register(base)
+            if base.startswith("V"):
+                if isinstance(value, list):
+                    if idx is None:
+                        self.CPU.update_memory(address, len(value))
+                        for i, v in enumerate(value):
+                            self.CPU.update_memory(address + 1 + i, v)
+                    else:
+                        if idx < 0 or idx >= len(value):
+                            self.report_error(
+                                "STORE operation error: index " + str(idx) + " out of range for register " + base + ".")
+                            return
+                        self.CPU.update_memory(address, value[idx])
+                else:
+                    self.report_error("STORE operation error: register " + base + " is not a vector as expected.")
             else:
+                if idx is not None:
+                    self.report_error("STORE operation error: scalar register " + base + " cannot be indexed.")
+                    return
                 self.CPU.update_memory(address, value)
         else:
-            self.report_error(f"Invalid register for STORE operation: {reg}")
+            self.report_error("STORE operation error: invalid register " + reg + ".")
 
     def handle_load_mem(self, reg, address):
         address = int(address)
-        if reg.startswith("V"):
-            length = self.CPU.return_memory(address)
-            if not isinstance(length, int):
-                self.report_error(f"Invalid vector length at address {address}")
-                return
-            value = [self.CPU.return_memory(address + 1 + i) for i in range(length)]
+        base, idx = self.parse_operand(reg)
+        if base in self.reg_names:
+            if base.startswith("V"):
+                if idx is None:
+                    length = self.CPU.return_memory(address)
+                    if not isinstance(length, int):
+                        self.report_error(
+                            "LOAD_MEM operation error: invalid vector length at memory address " + str(address) + ".")
+                        return
+                    value = [self.CPU.return_memory(address + 1 + i) for i in range(length)]
+                    self.CPU.update_register(base, value)
+                else:
+                    value = self.CPU.return_memory(address)
+                    vec = self.CPU.return_register(base)
+                    if not isinstance(vec, list):
+                        self.report_error("LOAD_MEM operation error: register " + base + " is expected to be a vector.")
+                        return
+                    if idx < 0 or idx >= len(vec):
+                        self.report_error(
+                            "LOAD_MEM operation error: index " + str(idx) + " out of range for register " + base + ".")
+                        return
+                    vec[idx] = value
+                    self.CPU.update_register(base, vec)
+            else:
+                if idx is not None:
+                    self.report_error("LOAD_MEM operation error: scalar register " + base + " cannot be indexed.")
+                    return
+                value = self.CPU.return_memory(address)
+                self.CPU.update_register(base, value)
         else:
-            value = self.CPU.return_memory(address)
-        self.CPU.update_register(reg, value)
+            self.report_error("LOAD_MEM operation error: invalid register " + reg + ".")
 
     def handle_print(self, key):
-        if key in self.reg_names:
-            self.cpu_executor.print(key)
+        base, index = self.parse_operand(key)
+        if base in self.reg_names:
+            if base.startswith("V") and index is not None:
+                vec = self.CPU.return_register(base)
+                if index < 0 or index >= len(vec):
+                    self.report_error("Index " + str(index) + " out of range for register " + base)
+                    return
+                print(vec[index])
+            else:
+                self.cpu_executor.print(base)
             return
         try:
-            head, buffer, var_type = self.variables[key]
+            head, buffer, var_type = self.variables[base]
             if var_type == "string":
-                values = [chr(self.CPU.return_memory(head + i)) for i in range(buffer)]
-                print("".join(values))
+                if index is not None:
+                    if index < 0 or index >= buffer:
+                        self.report_error("Index " + str(index) + " out of range for variable " + base)
+                        return
+                    print(chr(self.CPU.return_memory(head + index)))
+                else:
+                    values = [chr(self.CPU.return_memory(head + i)) for i in range(buffer)]
+                    print("".join(values))
             elif var_type == "vector":
-                values = [str(self.CPU.return_memory(head + i)) for i in range(buffer)]
-                print(f"[{' '.join(values)}]")
+                if index is not None:
+                    if index < 0 or index >= buffer:
+                        self.report_error("Index " + str(index) + " out of range for vector variable " + base)
+                        return
+                    print(self.CPU.return_memory(head + index))
+                else:
+                    values = [str(self.CPU.return_memory(head + i)) for i in range(buffer)]
+                    print(f"[{' '.join(values)}]")
             else:
-                print(self.CPU.return_memory(head))
-
+                if index is not None:
+                    self.report_error("Scalar variable " + base + " cannot be indexed")
+                else:
+                    print(self.CPU.return_memory(head))
         except:
             print(key)
 
@@ -659,6 +1036,46 @@ class Compiler:
                 self.instruction_index = self.labels[pos]
             else:
                 self.report_error(f"Invalid type for JNZ operation. Got: {pos}")
+
+    def handle_jg(self, reg, pos):
+        value = self.CPU.return_register(reg)
+        if value > 0:
+            if pos.isnumeric():
+                self.instruction_index = int(pos) - 2
+            elif pos in self.labels.keys():
+                self.instruction_index = self.labels[pos]
+            else:
+                self.report_error(f"Invalid type for JG operation. Got: {pos}")
+
+    def handle_jl(self, reg, pos):
+        value = self.CPU.return_register(reg)
+        if value < 0:
+            if pos.isnumeric():
+                self.instruction_index = int(pos) - 2
+            elif pos in self.labels.keys():
+                self.instruction_index = self.labels[pos]
+            else:
+                self.report_error(f"Invalid type for JL operation. Got: {pos}")
+
+    def handle_jge(self, reg, pos):
+        value = self.CPU.return_register(reg)
+        if value >= 0:
+            if pos.isnumeric():
+                self.instruction_index = int(pos) - 2
+            elif pos in self.labels.keys():
+                self.instruction_index = self.labels[pos]
+            else:
+                self.report_error(f"Invalid type for JGE operation. Got: {pos}")
+
+    def handle_jle(self, reg, pos):
+        value = self.CPU.return_register(reg)
+        if value <= 0:
+            if pos.isnumeric():
+                self.instruction_index = int(pos) - 2
+            elif pos in self.labels.keys():
+                self.instruction_index = self.labels[pos]
+            else:
+                self.report_error(f"Invalid type for JLE operation. Got: {pos}")
 
     def handle_jmp(self, pos):
         if pos.isnumeric():
@@ -739,6 +1156,99 @@ class Compiler:
             self.memory_index += len(values)
         except Exception as e:
             self.report_error(str(e))
+
+    def handle_push(self, key):
+        base, index = self.parse_operand(key)
+        if base in self.reg_names:
+            if base.startswith("V"):
+                if index is None:
+                    self.report_error("Cannot push entire vector register " + base + " to stack; specify an index.")
+                    return
+                else:
+                    vec = self.CPU.return_register(base)
+                    if index < 0 or index >= len(vec):
+                        self.report_error("Index " + str(index) + " out of range for register " + base + ".")
+                        return
+                    value = vec[index]
+            else:
+                if index is not None:
+                    self.report_error("Register " + base + " is scalar and cannot be indexed.")
+                    return
+                value = self.CPU.return_register(base)
+        elif base in self.variables:
+            head, buffer, var_type = self.variables[base]
+            if var_type == "vector":
+                if index is None:
+                    self.report_error("Cannot push entire vector variable " + base + " to stack; specify an index.")
+                    return
+                else:
+                    if index < 0 or index >= buffer:
+                        self.report_error("Index " + str(index) + " out of range for variable " + base + ".")
+                        return
+                    value = self.CPU.return_memory(head + index)
+            else:
+                if index is not None:
+                    self.report_error("Variable " + base + " is scalar and cannot be indexed.")
+                    return
+                value = self.CPU.return_memory(head)
+        else:
+            self.report_error("Invalid key for PUSH operation: " + key)
+            return
+        self.CPU.call_stack[self.stack_index] = value
+        self.stack_index += 1
+
+    def handle_pop(self, key):
+        if self.stack_index <= 0:
+            self.report_error("Stack underflow: no values to pop.")
+            return
+        self.stack_index -= 1
+        value = self.CPU.call_stack[self.stack_index]
+        base, index = self.parse_operand(key)
+        if base in self.reg_names:
+            if base.startswith("V"):
+                if index is None:
+                    self.report_error("Cannot pop to an entire vector register " + base + "; specify an index.")
+                    return
+                else:
+                    vec = self.CPU.return_register(base)
+                    if index < 0 or index >= len(vec):
+                        self.report_error("Index " + str(index) + " out of range for register " + base + ".")
+                        return
+                    vec[index] = value
+                    self.CPU.update_register(base, vec)
+            else:
+                if index is not None:
+                    self.report_error("Register " + base + " is scalar and cannot be indexed.")
+                    return
+                self.CPU.update_register(base, value)
+        elif base in self.variables:
+            head, buffer, var_type = self.variables[base]
+            if var_type == "vector":
+                if index is None:
+                    self.report_error("Cannot pop to an entire vector variable " + base + "; specify an index.")
+                    return
+                else:
+                    if index < 0 or index >= buffer:
+                        self.report_error("Index " + str(index) + " out of range for variable " + base + ".")
+                        return
+                    self.CPU.update_memory(head + index, value)
+                    if float(value).is_integer():
+                        new_type = "int"
+                    else:
+                        new_type = "float"
+                    self.variables[base] = [head, buffer, new_type]
+            else:
+                if index is not None:
+                    self.report_error("Variable " + base + " is scalar and cannot be indexed.")
+                    return
+                self.CPU.memory[head] = value
+                if float(value).is_integer():
+                    new_type = "int"
+                else:
+                    new_type = "float"
+                self.variables[base] = [head, buffer, new_type]
+        else:
+            self.report_error("Invalid key for POP operation: " + key)
 
     def load_file(self):
         with open(self.file_path, 'r') as file:

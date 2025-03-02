@@ -5,9 +5,10 @@ class VirtualCPU:
     def __init__(self):
         self.int_registers = {"I1": 0, "I2": 0, "I3": 0, "I4": 0, "I5": 0, "I6": 0}
         self.ff_registers = {"FF1": 0.0, "FF2": 0.0, "FF3": 0.0, "FF4": 0.0, "FF5": 0.0, "FF6": 0.0}
-        self.vector_registers = {"V1": [0.0] * 8, "V2": [0.0] * 8, "V3": [0.0] * 8, "V4": [0.0] * 8, "V5": [0.0] * 8,
-                                 "V6": [0.0] * 8}
+        self.vector_registers = {"V1": [0.0] * 32, "V2": [0.0] * 32, "V3": [0.0] * 32, "V4": [0.0] * 32, "V5": [0.0] * 32,
+                                 "V6": [0.0] * 32}
         self.memory = [None] * 1000
+        self.call_stack = [None] * 1000
 
     def _update_overflow(self):
         for reg in self.int_registers:

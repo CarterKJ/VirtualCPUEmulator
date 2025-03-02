@@ -1,0 +1,21 @@
+INPUT FF1,EnterNumber:;
+JZ FF1,PRINTZERO;
+MOVE FF2,FF1;
+DIV FF2,2;
+MOVE I1,100; //iterations
+
+LOOP:
+    MOVE FF3,FF1;
+    DIV FF3,FF2;
+    ADD FF3,FF2;
+    DIV FF3,2;
+    MOVE FF2,FF3;
+    SUB I1,1;
+    JNZ I1,LOOP;
+
+PRINT FF2;
+HALT 0;
+
+PRINTZERO:
+    PRINT FF1;
+    HALT 0;

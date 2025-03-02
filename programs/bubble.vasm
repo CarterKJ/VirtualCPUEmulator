@@ -1,0 +1,62 @@
+INPUT I1,EnterCount:;
+MOVE I2,0;
+
+INPUT_LOOP:
+    MOVE I3,I1;
+    SUB I3,I2;
+    JLE I3,END_INPUT;
+    INPUT FF1,EnterNumber:;
+    MOVE V1[I2],FF1;
+    ADD I2,1;
+    JMP INPUT_LOOP;
+
+END_INPUT:
+    MOVE I4,0;
+
+OUTER_LOOP:
+    MOVE I3,I1;
+    SUB I3,I4;
+    SUB I3,1;
+    JLE I3,END_OUTER;
+    MOVE I5,0;
+
+INNER_LOOP:
+    MOVE I3,I1;
+    SUB I3,I4;
+    SUB I3,1;
+    SUB I3,I5;
+    JLE I3,END_INNER;
+    MOVE FF2,V1[I5];
+    ADD I5,1;
+    MOVE FF3,V1[I5];
+    SUB I5,1;
+    MOVE FF4,FF2;
+    SUB FF2,FF3;
+    JLE FF2,NOSWAP;
+
+MOVE V1[I5],FF3;
+ADD I5,1;
+MOVE V1[I5],FF4;
+SUB I5,1;
+
+NOSWAP:
+    ADD I5,1;
+    JMP INNER_LOOP;
+
+END_INNER:
+    ADD I4,1;
+    JMP OUTER_LOOP;
+
+END_OUTER:
+    MOVE I2,0;
+
+PRINT_LOOP:
+    MOVE I3,I1;
+    SUB I3,I2;
+    JLE I3,END_PRINT;
+    PRINT V1[I2];
+    ADD I2,1;
+    JMP PRINT_LOOP;
+
+END_PRINT:
+    HALT 0;
