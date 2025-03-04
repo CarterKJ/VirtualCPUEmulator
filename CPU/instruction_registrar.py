@@ -222,8 +222,8 @@ class InstructionRegistrar:
         else:
             self.compiler.report_error(f"Invalid key for MOVE operation: {reg}")
 
-    def print(self, reg):
+    def print(self, reg, end):
         if reg in self.CPU.int_registers or reg in self.CPU.ff_registers or reg in self.CPU.vector_registers:
-            print(self.CPU.return_register(reg))
+            print(self.CPU.return_register(reg), end=end)
         else:
             print(reg)

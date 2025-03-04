@@ -7,7 +7,7 @@ start:
 
 loop_start:
     JZ I4,end;   // jump to end of I4 is 0
-    PRINT I3;
+    PRINTF I3;
     MOVE I1,I2;
     MOVE I2,I3;
     MOVE I3,0;

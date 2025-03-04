@@ -54,7 +54,7 @@ PRINT_LOOP:
     MOVE I3,I1;
     SUB I3,I2;
     JLE I3,END_PRINT;
-    PRINT V1[I2];
+    PRINTF V1[I2];
     ADD I2,1;
     JMP PRINT_LOOP;
 

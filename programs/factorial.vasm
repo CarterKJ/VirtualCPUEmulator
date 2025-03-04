@@ -12,5 +12,5 @@ factorial_loop:
     JNZ I2,factorial_loop;
 
 factorial_end:
-    PRINT I1;
+    PRINTF I1;
     HALT 0;
