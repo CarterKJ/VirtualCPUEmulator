@@ -1,7 +1,46 @@
-INPUT num,ENTER NUMBER;
-INPUT mun,ENTER NUMBER;
-MOVE FF1,mun;
-MOVE FF2,num;
-MUL FF1,FF2;
-PRINT YOUR NUMBER IS;
-PRINT FF1;
+MOVE I5,21; // x range
+MOVE I6,10; // y range
+VAR space," ";
+MOVE I2,I5; // x counter
+MUL I2,-1;
+MOVE I3,I6; // y counter
+
+DEF Function:
+    MUL FF1,1;
+RETURN;
+
+print_graph:
+   ADD I2,1;
+   PUSH I2;
+   SUB I2,I5;
+   JZ I2,reset_x;
+   POP I2;
+   MOVE FF1,I2;
+   CALL Function;
+   SUB FF1,I3;
+   JZ FF1,print_hash;
+   JZ I3,print_hash;
+   JZ I2,print_hash;
+   JNZ I2,print_blank;
+   JNZ I3,print_blank;
+
+reset_x:
+    MOVE I2,I5;
+    MUL I2,-1;
+    SUB I3,1;
+    PUSH I3;
+    MUL I3,-1;
+    SUB I3,I6;
+    JZ I3,done;
+    POP I3;
+    PRINTF space;
+    JMP print_graph;
+
+print_hash:
+    PRINT #;
+    JMP print_graph;
+print_blank:
+    PRINT .;
+    JMP print_graph;
+done:
+    HALT 0;

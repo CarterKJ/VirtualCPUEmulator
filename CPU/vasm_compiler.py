@@ -21,6 +21,7 @@ class Compiler:
             "STORE": self.handle_store,
             "LOADM": self.handle_load_mem,
             "PRINT": self.handle_print,
+            "PRINTF": self.handle_print_newlinw,
             "TEXT": self.handle_print_ascii,
             "JZ": self.handle_jz,
             "JNZ": self.handle_jnz,
@@ -973,7 +974,7 @@ class Compiler:
         else:
             self.report_error("LOAD_MEM operation error: invalid register " + reg + ".")
 
-    def handle_print(self, key):
+    def handle_print(self, key, end=""):
         base, index = self.parse_operand(key)
         if base in self.reg_names:
             if base.startswith("V") and index is not None:
@@ -981,9 +982,9 @@ class Compiler:
                 if index < 0 or index >= len(vec):
                     self.report_error("Index " + str(index) + " out of range for register " + base)
                     return
-                print(vec[index])
+                print(vec[index], end=end)
             else:
-                self.cpu_executor.print(base)
+                self.cpu_executor.print(base,end)
             return
         try:
             head, buffer, var_type = self.variables[base]
@@ -992,26 +993,29 @@ class Compiler:
                     if index < 0 or index >= buffer:
                         self.report_error("Index " + str(index) + " out of range for variable " + base)
                         return
-                    print(chr(self.CPU.return_memory(head + index)))
+                    print(chr(self.CPU.return_memory(head + index)),end=end)
                 else:
                     values = [chr(self.CPU.return_memory(head + i)) for i in range(buffer)]
-                    print("".join(values))
+                    print("".join(values),end=end)
             elif var_type == "vector":
                 if index is not None:
                     if index < 0 or index >= buffer:
                         self.report_error("Index " + str(index) + " out of range for vector variable " + base)
                         return
-                    print(self.CPU.return_memory(head + index))
+                    print(self.CPU.return_memory(head + index),end=end)
                 else:
                     values = [str(self.CPU.return_memory(head + i)) for i in range(buffer)]
-                    print(f"[{' '.join(values)}]")
+                    print(f"[{' '.join(values)}]",end=end)
             else:
                 if index is not None:
                     self.report_error("Scalar variable " + base + " cannot be indexed")
                 else:
-                    print(self.CPU.return_memory(head))
+                    print(self.CPU.return_memory(head),end=end)
         except:
-            print(key)
+            print(key,end=end)
+
+    def handle_print_newlinw(self, key):
+        self.handle_print(key, end="\n")
 
     def handle_print_ascii(self, reg):
         value = self.CPU.return_register(reg)
